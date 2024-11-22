@@ -146,7 +146,7 @@ pub fn cpu(config: Config) -> Result<(), Box<dyn Error>> {
     let file = output_file();
 
     // create object for computing rewards (relative rarity) for a given address
-    let rewards = Reward::new();
+    // let rewards = Reward::new();
 
     // begin searching for addresses
     loop {
@@ -196,17 +196,25 @@ pub fn cpu(config: Config) -> Result<(), Box<dyn Error>> {
                     }
                 }
 
-                // only proceed if there are at least three zero bytes
-                if total < 3 {
+                // // only proceed if there are at least three zero bytes
+                // if total < 3 {
+                //     return;
+                // }
+
+                // // look up the reward amount
+                // let key = leading * 20 + total;
+                // let reward_amount = rewards.get(&key);
+
+                // // only proceed if an efficient address has been found
+                // if reward_amount.is_none() {
+                //     return;
+                // }
+                let uni_score: Option<u32> = uniscore(address);
+                if uni_score.is_none() {
                     return;
                 }
 
-                // look up the reward amount
-                let key = leading * 20 + total;
-                let reward_amount = rewards.get(&key);
-
-                // only proceed if an efficient address has been found
-                if reward_amount.is_none() {
+                if uni_score.unwrap_or(0) < 40 {
                     return;
                 }
 
@@ -218,7 +226,7 @@ pub fn cpu(config: Config) -> Result<(), Box<dyn Error>> {
                 // display the salt and the address.
                 let output = format!(
                     "{full_salt} => {address} => {}",
-                    reward_amount.unwrap_or("0")
+                    uni_score.unwrap()
                 );
                 println!("{output}");
 
@@ -512,22 +520,33 @@ pub fn gpu(config: Config) -> ocl::Result<()> {
             let mut leading = 0;
             for (i, &b) in address.iter().enumerate() {
                 if b == 0 {
-                    total += 1;
+                    // total += 1;
                 } else if leading == 0 {
                     // set leading on finding non-zero byte
                     leading = i;
                 }
+                if b==4{
+                    total+=1;
+                }
             }
 
+
+
             let key = leading * 20 + total;
-            let reward = rewards.get(&key).unwrap_or("0");
+            // let reward = rewards.get(&key).unwrap_or("0");
+            let uni_score = uniscore(address);
+            
+            if uni_score.is_none() {
+                continue;
+            }
+
             let output = format!(
                 "0x{}{}{} => {} => {}",
                 hex::encode(config.calling_address),
                 hex::encode(salt),
                 hex::encode(solution),
                 address,
-                reward,
+                uni_score.unwrap_or(0)
             );
 
             let show = format!("{output} ({leading} / {total})");
@@ -573,4 +592,67 @@ fn mk_kernel_src(config: &Config) -> String {
     src.push_str(KERNEL_SRC);
 
     src
+}
+
+// Add this function somewhere in lib.rs
+fn uniscore(address: &Address) -> Option<u32> {
+    let mut score = 0;
+    let mut leading_zeros = 0;
+    let mut found_first_nonzero = false;
+    
+    // Convert address bytes to nibbles for easier processing
+    let nibbles: Vec<u8> = address.iter()
+        .flat_map(|&byte| [byte >> 4, byte & 0x0F])
+        .collect();
+    
+    // Check if first non-zero nibble is 4, if not return None
+    for &nibble in &nibbles {
+        if !found_first_nonzero {
+            if nibble == 0 {
+                leading_zeros += 1;
+                continue;
+            }
+            if nibble != 4 {
+                return None;
+            }
+            found_first_nonzero = true;
+        }
+        break;
+    }
+    
+    if leading_zeros < 4 {
+        return None;
+    }
+
+    // Add points for leading zeros
+    score += leading_zeros * 10;
+    
+    // Check for four consecutive 4s at start (after leading zeros)
+    let start_idx = leading_zeros as usize;
+    if nibbles[start_idx..start_idx + 4].iter().all(|&x| x == 4) {
+        score += 40;
+        // Add 20 points if the nibble after the four 4s is not 4
+        if start_idx + 4 < nibbles.len() && nibbles[start_idx + 4] != 4 {
+            score += 20;
+        }
+    }
+    
+    // Check for four 4s at the end
+    if nibbles[36..40].iter().all(|&x| x == 4) {
+        score += 20;
+    }
+    
+    // Count remaining 4s (excluding the ones we've already scored)
+    for &nibble in &nibbles[start_idx + 4..36] {
+        if nibble == 4 {
+            score += 1;
+        }
+    }
+    
+    // Return None if score is less than 40
+    if score < 40 {
+        return None;
+    }
+    
+    Some(score)
 }

@@ -535,7 +535,7 @@ pub fn gpu(config: Config) -> ocl::Result<()> {
             let key = leading * 20 + total;
             // let reward = rewards.get(&key).unwrap_or("0");
             let uni_score = uniscore(address);
-            
+
             if uni_score.is_none() {
                 continue;
             }
@@ -635,8 +635,10 @@ fn uniscore(address: &Address) -> Option<u32> {
         if start_idx + 4 < nibbles.len() && nibbles[start_idx + 4] != 4 {
             score += 20;
         }
+    } else {
+        return None;
     }
-    
+     
     // Check for four 4s at the end
     if nibbles[36..40].iter().all(|&x| x == 4) {
         score += 20;
